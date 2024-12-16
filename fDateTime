@@ -1,0 +1,26 @@
+FUNCTION fDateTime : DT
+VAR_INPUT
+	iSec:INT;
+	iMinute:INT;
+	iHour:INT;
+	iDay:INT;
+	iMonth:INT;
+	iYear:INT;
+END_VAR
+VAR
+	iCount: INT;
+	dwDate: DWORD;
+END_VAR
+
+IF iMonth > 2 THEN
+	iCount := (iMonth - 1) * 30;
+	IF iMonth > 7 THEN iCount := iCount + SHR(iMonth - 3,1); ELSE iCount := iCount + SHR(iMonth - 4,1); END_IF;
+	(* chech for leap year and add one day if true *)
+	IF SHL(iYear,14) = 0 THEN iCount := iCount + 1; END_IF;
+ELSE
+	iCount := (iMonth - 1) * 31;
+END_IF;
+
+dwDate := ((INT_TO_DWORD(iCount + iDay - 1) + SHR(INT_TO_DWORD(iYear) * 1461 - 2878169, 2)) * 86400);
+
+fDateTime := DWORD_TO_DT(dwDate + INT_TO_DWORD(iSec) + INT_TO_DWORD(iMinute) * 60 + INT_TO_DWORD(iHour) * 3600);
