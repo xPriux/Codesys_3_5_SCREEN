@@ -1,0 +1,139 @@
+PROGRAM pouUsbManagement
+VAR CONSTANT
+	MAX_BUFFER : LWORD:=30000; //Maximum number of bytes that the settings file should be.
+END_VAR
+VAR_OUTPUT
+	strData:ARRAY [0..700] OF strCVSData; //Structure storing the data once interpreted and concatenated.	
+END_VAR
+VAR
+	
+	// Fb 
+		//USB 
+		fbUsbStorageAcces: ifmDevice.USBstorageHandler;
+		
+	// data 
+		//USb 
+	
+	//Read
+	ErrCode : SysFile.SYS_FILE_STATUS := SysFile.SYS_FILE_STATUS.FS_NO_FILE;
+	Data : ARRAY[0..MAX_BUFFER] OF BYTE; //Array storing character by character the data stored in the file (CODE DEC ASCII).
+	DataString	:	ARRAY[0..MAX_BUFFER] OF STRING; //Array storing character by character the data stored in the file (CARA ASCII).
+	BytesRead : __XWORD := 0; //Number of bytes read.
+	FileName : STRING; //:= '/home/cds-apps/PlcLogic/Application/para.txt'; //File path.
+	pResult : POINTER TO SysFile.RTS_IEC_RESULT;
+	FileHandle : SysFile.RTS_IEC_HANDLE;
+	pFileData : POINTER TO BYTE := ADR(Data); // Pointer to data. 
+	
+	//Write 
+	xWrite:BOOL:=FALSE;
+	BytesWrite : __XWORD := 0; //Number of bytes write.
+	fbWriteCSV:ifmFileUtil.WriteCSVData_Linear;
+	test23: STRING(ifmFileUtil.ifmGCL.uiGenericLogSizeMax);
+	
+	//Save 
+	fbDeleteFileDevice:ifmFileUtil.DeleteFile;
+	fbFileCopyDevice:ifmFileUtil.FileCopy;
+	fbDeleteFileUSB:ifmFileUtil.DeleteFile;
+	fbFileCopyUSB:ifmFileUtil.FileCopy;
+	
+	//Counters and flags.
+	i:LWORD;
+	g:LWORD;
+	p:WORD:=0;
+	f:LWORD:=0;
+	z:LWORD:=0;
+	xInterpretedDone: BOOL:=FALSE;
+	
+
+	xSaveDevice:BOOL:=FALSE;
+	xSaveUsb:BOOL:=FALSE;
+	
+	//Commands 
+	xUsbRemove:BOOL:=FALSE;
+	xDownloadCommand: BOOL:=FALSE;
+
+END_VAR
+
+// Enable usb storage access 
+fbUsbStorageAcces(xEnable:=TRUE,xRemoveDevice:=xUsbRemove);
+
+xGVL_FAULT_USB_MANAGE:=fbUsbStorageAcces.xError;
+
+IF fbUsbStorageAcces.xPrepared AND fbUsbStorageAcces.usiNumOfUSBdevice<>0 AND xDownloadCommand AND NOT fbUsbStorageAcces.xError THEN	
+	FileName:=CONCAT(fbUsbStorageAcces.sAccessPath,'/para.txt'); 
+	xInterpretedDone:=FALSE;
+ELSE
+	FileName:='/home/cds-apps/PlcLogic/Application/para.txt';	
+END_IF
+
+FileHandle	:= SysFileOpen(szFile:= FileName, am:=ACCESS_MODE.AM_READ, pResult:=pResult);
+//verify found a file
+IF FileHandle = SysFile.RTS_INVALID_HANDLE THEN
+   //no file found
+   ErrCode := SysFile.SYS_FILE_STATUS.FS_NO_FILE;
+ELSE
+   //try to read file out
+   BytesRead := SysFileRead(hFile:=FileHandle, pbyBuffer:=pFileData, ulSize:=MAX_BUFFER, pResult:=pResult);
+   
+   //check if actually read any bytes
+   IF BytesRead > 0 THEN
+	  ErrCode := SysFile.SYS_FILE_STATUS.FS_OK;
+   ELSE
+	  ErrCode := SysFile.SYS_FILE_STATUS.FS_NO_FILE;
+   END_IF
+END_IF
+//close file
+SysFileClose(hFile:=FileHandle);
+
+// Writing process data from the file stored internally or from the file stored on the USB key
+IF NOT xInterpretedDone THEN
+	// Reset 
+	p:=0;i:=0;g:=0;f:=0; 
+	FOR p:=0 TO 700 BY 1 DO 
+		strData[p].Index:=0;
+		strData[p].Init:=0;
+		strData[p].minvalue:=0;
+		strData[p].maxvalue:=0;
+		strData[p].unit:='';
+		strData[p].lvl:=0;
+		strData[p].Ena:='';
+	END_FOR
+	FOR i:= 0 TO BytesRead BY 1 DO
+		DataString[i]:=OSCAT_BASIC.CHR_TO_STRING(Data[i]);
+		IF Data[i]=59 THEN 
+			f:=f+1;
+		ELSIF Data[i]=13 THEN 
+			g:=g+1;
+			f:=0; 
+		ELSIF Data[i]<>10 THEN 
+			CASE f OF
+				0:	strData[g].Index:=STRING_TO_WORD(concat(WORD_TO_STRING(strData[g].Index),DataString[i]));
+				1:	strData[g].Init:=STRING_TO_DINT(concat(DINT_TO_STRING(strData[g].Init),DataString[i]));
+				2:	strData[g].minvalue:=STRING_TO_DINT(concat(DINT_TO_STRING(strData[g].minvalue),DataString[i]));
+				3:	strData[g].maxvalue:=STRING_TO_DINT(concat(DINT_TO_STRING(strData[g].maxvalue),DataString[i]));
+				4:	strData[g].unit:=concat( strData[g].unit,DataString[i]);
+				5:	strData[g].lvl:=STRING_TO_BYTE(concat(BYTE_TO_STRING(strData[g].lvl),DataString[i]));
+				6:	strData[g].Ena:=concat(strData[g].Ena,DataString[i]);
+			END_CASE
+		END_IF
+	END_FOR
+	xInterpretedDone:=TRUE;
+END_IF	
+
+(*IF xWrite THEN
+	FileName:='/home/cds-apps/PlcLogic/Application/test.txt'; 
+	FileHandle	:= SysFileOpen(szFile:=FileName, am:=ACCESS_MODE.AM_APPEND_PLUS, pResult:=pResult);	
+	SysFileGetPos(hFile:=FileHandle,pulPos:=pstest);
+	BytesWrite:=SysFileWrite(hFile:=FileHandle,pbyBuffer:=pstest,ulSize:=BytesRead,pResult:=pResult);
+	SysFileClose(hFile:=FileHandle);
+	xWrite:=FALSE;
+END_IF*)
+
+
+// Save setting file to device
+fbDeleteFileDevice(xExecute:=xSaveDevice,sFileName:='/home/cds-apps/PlcLogic/Application/backup/para.txt');
+fbFileCopyDevice(xExecute:=fbDeleteFileDevice.xDone,sSource:='/home/cds-apps/PlcLogic/Application/para.txt',sDestin:='/home/cds-apps/PlcLogic/Application/old/para.txt');
+
+// Save setting file to USB
+fbDeleteFileUSB(xExecute:=xSaveUsb,sFileName:=CONCAT(fbUsbStorageAcces.sAccessPath,'/backup/para.txt'));
+fbFileCopyUSB(xExecute:=fbDeleteFileUSB.xDone,sSource:='/home/cds-apps/PlcLogic/Application/para.txt',sDestin:=CONCAT(fbUsbStorageAcces.sAccessPath,'/old'));
